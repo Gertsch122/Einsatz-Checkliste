@@ -491,7 +491,8 @@ let SES=LS.get('ck_session',null);
 async function sbFetch(path,opt,auth){opt=opt||{};if(auth===undefined)auth=true;
   const h=Object.assign({'apikey':SB_KEY,'Content-Type':'application/json'},opt.headers||{});
   if(auth&&SES&&SES.access_token)h.Authorization='Bearer '+SES.access_token;
-  const r=await fetch(SB_URL+path,Object.assign({},opt,{headers:h}));
+  let r;try{r=await fetch(SB_URL+path,Object.assign({},opt,{headers:h}))}
+  catch(e){await new Promise(z=>setTimeout(z,1200));try{r=await fetch(SB_URL+path,Object.assign({},opt,{headers:h}))}catch(e2){const x=new Error('network: '+(e2&&e2.message||e2));x.net=true;x.raw=String(e2&&e2.message||e2);throw x}}
   const t=await r.text();let j=null;try{j=t?JSON.parse(t):null}catch(e){}
   if(!r.ok){const e=new Error((j&&(j.msg||j.message||j.error_description||j.error))||('Fehler '+r.status));e.status=r.status;throw e}
   return j}
@@ -512,7 +513,7 @@ function deErr(e){const m=String(e&&e.message||e);
   if(/signups? not allowed|signup.*disabled/i.test(m))return 'Neue Registrierungen sind derzeit ausgeschaltet.';
   if(/valid email|invalid.*email|unable to validate email/i.test(m))return 'Bitte eine gültige E-Mail-Adresse eingeben.';
   if(/api key|apikey/i.test(m))return 'Verbindung zum Server abgelehnt (Schlüssel). Bitte dem Ersteller der App melden.';
-  if(/failed to fetch|networkerror|load failed|network/i.test(m))return 'Keine Verbindung zum Server. Bitte Internetverbindung prüfen.';
+  if(e&&e.net||/failed to fetch|networkerror|load failed/i.test(m))return 'Keine Verbindung zum Server ('+SB_URL.replace('https://','')+'). Mögliche Ursachen: kein Internet, Supabase-Projekt pausiert, VPN/Werbeblocker. Technisch: '+(e&&e.raw||m);
   return m}
 const store={cloud:false,timer:null,busy:false,again:false,
   init(){return this.pull()},
