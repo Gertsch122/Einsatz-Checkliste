@@ -196,6 +196,16 @@ optgroup,option{background:var(--chip);color:var(--ftx)}
 .btime{margin:10px 0 0;padding:8px 10px;background:var(--okbg);border:1px solid var(--ok);color:var(--ok)}
 .chip.mini{min-height:36px;font-size:12px;text-transform:none;padding:0 10px}
 input[type=datetime-local].field{color-scheme:dark}
+.btn.lnk{display:inline-flex;align-items:center;text-decoration:none}
+.btn.sm{min-height:38px;font-size:12px;padding:0 10px}
+.rmap{height:380px;margin-top:12px;border:1px solid var(--bd);background:#ddd;z-index:1}
+.rmap a{color:#1a5fb4}
+.rxlist{margin-top:12px}
+.rxs{border:1px solid var(--bd);background:var(--chip);padding:10px 12px;margin-bottom:8px}
+.rxh{display:flex;align-items:center;gap:8px;color:var(--ftx)}.rxh b{font-weight:400;letter-spacing:.06em}
+.rxh .km{color:var(--ac);min-width:64px;font-variant-numeric:tabular-nums}
+.rxn{margin:4px 0 0;color:var(--tx);font-size:14px;overflow-wrap:anywhere}
+.bdot{display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid #000;vertical-align:middle;margin-right:4px}
 </style>
 </head>
 <body>
@@ -1010,15 +1020,20 @@ function routeHTML(m){const tr=curTrip(m);const all=allCountries();
       <label class="lbl" for="xn_${n}" style="margin-top:10px">Notiz</label><input class="field" id="xn_${n}" data-xn="${esc(b.k)}" maxlength="200" value="${esc(b.x.n||'')}" placeholder="z. B. 40 Min. Wartezeit, Kontrolle Fahrzeug">
       ${b.x.at?`<div class="row" style="margin-top:8px"><button class="btn" type="button" data-a="xclr" data-k="${esc(b.k)}">Zeit löschen</button></div>`:''}</div>`}).join('');
   if(!bs.length)h+=`<p class="status">Die Strecke hat nur ein Land. Über „✎ Strecke bearbeiten“ Länder hinzufügen.</p>`;
-  return h}
+  return h+rxHTML(m,tr)}
 function bindRoute(m){const tr=curTrip(m);if(!tr)return;const X=k=>{tr.x=tr.x||{};return tr.x[k]=tr.x[k]||{}};
   $('view').querySelectorAll('[data-xp]').forEach(i=>i.addEventListener('change',()=>{X(i.dataset.xp).p=i.value.trim();save()}));
   $('view').querySelectorAll('[data-xn]').forEach(i=>i.addEventListener('change',()=>{X(i.dataset.xn).n=i.value.trim();save()}));
-  $('view').querySelectorAll('[data-xat]').forEach(i=>i.addEventListener('change',()=>{X(i.dataset.xat).at=i.value;save();toast(i.value?'Zeit gespeichert':'Zeit gelöscht');const y=window.scrollY;render();window.scrollTo(0,y)}))}
+  $('view').querySelectorAll('[data-xat]').forEach(i=>i.addEventListener('change',()=>{X(i.dataset.xat).at=i.value;save();toast(i.value?'Zeit gespeichert':'Zeit gelöscht');const y=window.scrollY;render();window.scrollTo(0,y)}));
+  if(rxMapOpen&&tr.rx){const f=rxFocusId;rxFocusId=null;rxDrawMap(tr,f).then(()=>{if(f){const e=$('rmap');if(e)e.scrollIntoView({block:'center'})}})}}
 function routeAction(a,b,m){const v=b.dataset.v,k=b.dataset.k;const tr=curTrip(m);const X=kk=>{tr.x=tr.x||{};return tr.x[kk]=tr.x[kk]||{}};
   switch(a){
     case 'rtnew':{const f=$('rtFrom').value,t=$('rtTo').value;if(!t){toast('Bitte ein Ziel wählen');return true}m.trips=m.trips||[];const id=uid();m.trips.push({id,name:'Hinfahrt',c:routeFor(f,t),x:{}});tripSel=id;routeEdit=false;save();toast('Strecke vorgeschlagen – bei Bedarf bearbeiten');return false}
-    case 'rtpick':tripSel=v;return false;
+    case 'rtpick':tripSel=v;rxView=null;return false;
+    case 'rxrun':rxRun(m,tr);return true;
+    case 'rxmap':rxMapOpen=!rxMapOpen;return false;
+    case 'rxbrand':rxBrand=v;return false;
+    case 'rxfocus':rxMapOpen=true;rxFocusId=v;return false;
     case 'rtback':{const id=uid();const x={};Object.entries(tr.x||{}).forEach(([kk,o])=>{const [p,q]=kk.split('>');if(o.p)x[xKey(q,p)]={p:o.p}});m.trips.push({id,name:'Rückfahrt',c:tr.c.slice().reverse(),x});tripSel=id;save();toast('Rückfahrt angelegt');return false}
     case 'rtedit':routeEdit=!routeEdit;return false;
     case 'rtup':{const i=+v;[tr.c[i-1],tr.c[i]]=[tr.c[i],tr.c[i-1]];save();return false}
@@ -1033,6 +1048,89 @@ function routeAction(a,b,m){const v=b.dataset.v,k=b.dataset.k;const tr=curTrip(m
     case 'xclr':X(k).at='';save();return false;
   }
   return null}
+
+/* ---------- ROUTEX-Tankstellen an der Strecke ---------- */
+const RX_BRANDS=['Aral','BP','Circle K','Eni','OMV','Petrom','Hellenic','Kuster'];
+const RX_COLOR={'Aral':'#1E5BC6','BP':'#2E9E3E','Circle K':'#E2231A','Eni':'#F5C400','OMV':'#3C7FB1','Petrom':'#7A2D8C','Hellenic':'#1A8BC4','Kuster':'#E87722'};
+let rxFocusId=null,rxMapOpen=false,rxBusy='',rxBrand='Alle',rxMap=null,rxMarkers={},rxView=null;
+function rxNorm(t){const s=((t.brand||'')+' '+(t.name||'')).toLowerCase();
+  if(/\baral\b/.test(s))return 'Aral';if(/circle ?k|statoil/.test(s))return 'Circle K';if(/\bomv\b/.test(s))return 'OMV';if(/\b(eni|agip)\b/.test(s))return 'Eni';
+  if(/\bpetrom\b/.test(s))return 'Petrom';if(/\bhellenic\b/.test(s))return 'Hellenic';if(/\bkuster\b/.test(s))return 'Kuster';if(/\bbp\b/.test(s))return 'BP';return null}
+const hav=(a,b)=>{const R=6371,r=Math.PI/180,dl=(b[0]-a[0])*r,dn=(b[1]-a[1])*r;const x=Math.sin(dl/2)**2+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(x))};
+function simplify(pts,tol){if(pts.length<3)return pts;const keep=new Uint8Array(pts.length);keep[0]=keep[pts.length-1]=1;const st=[[0,pts.length-1]];
+  while(st.length){const [a,b]=st.pop();let md=0,mi=-1;const [ax,ay]=pts[a],[bx,by]=pts[b];const dx=bx-ax,dy=by-ay,L=dx*dx+dy*dy;
+    for(let i=a+1;i<b;i++){const [px,py]=pts[i];let t=L?((px-ax)*dx+(py-ay)*dy)/L:0;t=Math.max(0,Math.min(1,t));const ex=ax+t*dx-px,ey=ay+t*dy-py;const d=ex*ex+ey*ey;if(d>md){md=d;mi=i}}
+    if(mi>0&&md>tol*tol){keep[mi]=1;st.push([a,mi],[mi,b])}}
+  return pts.filter((_,i)=>keep[i])}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function geocode(q){S.geoCache=S.geoCache||{};if(S.geoCache[q])return S.geoCache[q];
+  const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=de&q='+encodeURIComponent(q));if(!r.ok)throw new Error('Ortssuche '+r.status);
+  const j=await r.json();await sleep(1100);if(!j.length)return null;const p=[+(+j[0].lat).toFixed(5),+(+j[0].lon).toFixed(5)];S.geoCache[q]=p;return p}
+function rxProg(t){rxBusy=t;const e=$('rxProg');if(e)e.textContent=t}
+async function rxRun(m,tr){const from=($('rxFrom').value||'').trim()||'Wien',to=($('rxTo').value||'').trim(),rad=+$('rxRad').value||2000;
+  if(!to){toast('Bitte einen Zielort eingeben');return}
+  if(!navigator.onLine){toast('Keine Internetverbindung');return}
+  const btn=$('rxGo');if(btn)btn.disabled=true;
+  try{const wps=[],miss=[];
+    rxProg('Suche Startort …');const ps=await geocode(from+(tr.c[0]?', '+tr.c[0]:''))||await geocode(from);if(!ps)throw new Error('Startort „'+from+'“ nicht gefunden');wps.push({n:from,p:ps});
+    const bs=borders(tr);for(let i=0;i<bs.length;i++){const b=bs[i];const pt=(b.x.p||'').trim();if(!pt){miss.push(b.a+' → '+b.b);continue}
+      rxProg('Suche Grenzübergang '+(i+1)+' von '+bs.length+': '+pt+' …');const first=pt.split('/')[0].trim();
+      const p=await geocode(first+', '+b.a)||await geocode(pt)||await geocode(first);if(p)wps.push({n:pt,p});else miss.push(b.a+' → '+b.b+' ('+pt+')')}
+    rxProg('Suche Zielort …');const last=tr.c[tr.c.length-1]||'';const pe=await geocode(to+(last?', '+last:''))||await geocode(to);if(!pe)throw new Error('Zielort „'+to+'“ nicht gefunden');wps.push({n:to,p:pe});
+    rxProg('Berechne Fahrtstrecke …');
+    const r=await fetch('https://router.project-osrm.org/route/v1/driving/'+wps.map(w=>w.p[1]+','+w.p[0]).join(';')+'?overview=full&geometries=geojson');
+    if(!r.ok)throw new Error('Routenberechnung '+r.status);const j=await r.json();if(!j.routes||!j.routes.length)throw new Error('Keine Route gefunden');
+    const full=j.routes[0].geometry.coordinates.map(c=>[c[1],c[0]]);const km=Math.round(j.routes[0].distance/1000),hrs=j.routes[0].duration/3600;
+    let line=simplify(full,0.004);if(line.length>700)line=simplify(full,0.012);line=line.map(p=>[+p[0].toFixed(5),+p[1].toFixed(5)]);
+    const cum=[0];for(let i=1;i<line.length;i++)cum.push(cum[i-1]+hav(line[i-1],line[i]));const scale=cum[cum.length-1]?km/cum[cum.length-1]:1;
+    const qline=simplify(full,0.006).map(p=>[+p[0].toFixed(4),+p[1].toFixed(4)]);const chunks=[];for(let i=0;i<qline.length-1;i+=120)chunks.push(qline.slice(i,i+121));
+    const bre='^('+['Aral','BP','Circle K','Statoil','Eni','Agip','OMV','Petrom','Hellenic','Kuster'].join('|')+')';const found={};
+    for(let i=0;i<chunks.length;i++){rxProg('Suche Tankstellen … Abschnitt '+(i+1)+' von '+chunks.length);
+      const ar='(around:'+rad+','+chunks[i].map(p=>p[0]+','+p[1]).join(',')+')';
+      const q='[out:json][timeout:120];(nwr["amenity"="fuel"]["brand"~"'+bre+'",i]'+ar+';nwr["amenity"="fuel"]["name"~"'+bre+'( |$)",i]'+ar+';);out center tags;';
+      let rr=null;for(let k=0;k<2&&!rr;k++){try{const x=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});if(x.ok)rr=await x.json();else await sleep(3000)}catch(e){await sleep(3000)}}
+      if(!rr)throw new Error('Tankstellen-Suche nicht erreichbar (Abschnitt '+(i+1)+')');
+      (rr.elements||[]).forEach(e=>{const t=e.tags||{};const br=rxNorm(t);if(!br)return;const lat=e.lat||(e.center&&e.center.lat),lon=e.lon||(e.center&&e.center.lon);if(lat==null)return;
+        let bi=0,bd=1e9;for(let n=0;n<line.length;n++){const d=(line[n][0]-lat)**2+(line[n][1]-lon)**2;if(d<bd){bd=d;bi=n}}
+        found[e.type+e.id]={id:e.type+e.id,b:br,n:t.name||br,a:[t['addr:street']?(t['addr:street']+(t['addr:housenumber']?' '+t['addr:housenumber']:'')):'',t['addr:postcode']||'',t['addr:city']||t['addr:place']||''].filter(Boolean).join(' '),
+          lat:+(+lat).toFixed(5),lon:+(+lon).toFixed(5),km:Math.round(cum[bi]*scale),oh:t.opening_hours||'',hgv:t.hgv==='yes'}})}
+    tr.rx={from,to,rad,at:nowLocal(),km,h:+hrs.toFixed(1),line,wp:wps.map(w=>({n:w.n,p:w.p})),miss,st:Object.values(found).sort((a,b)=>a.km-b.km)};
+    rxProg('');save();toast(tr.rx.st.length+' Tankstellen gefunden');rxMapOpen=true;const y=window.scrollY;render();window.scrollTo(0,y)}
+  catch(e){rxProg('');const el=$('rxErr');if(el){el.textContent='Fehler: '+(e&&e.message||e)+'. Bitte Internetverbindung prüfen und erneut versuchen.';el.hidden=false}if(btn)btn.disabled=false;save()}}
+const navG=s=>`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}&travelmode=driving`;
+const navA=s=>`https://maps.apple.com/?daddr=${s.lat},${s.lon}&dirflg=d`;
+function rxRouteLink(rx){const w=rx.wp||[];if(w.length<2)return '';const mid=w.slice(1,-1).slice(0,8).map(x=>x.p.join(',')).join('|');
+  return `https://www.google.com/maps/dir/?api=1&origin=${w[0].p.join(',')}&destination=${w[w.length-1].p.join(',')}${mid?'&waypoints='+encodeURIComponent(mid):''}&travelmode=driving`}
+function rxHTML(m,tr){const rx=tr.rx;const last=tr.c[tr.c.length-1]||'';const dCity=((m.dest||[]).find(d=>d.country===last)||{}).city||(GEO[last]||[])[0]||'';
+  let h=`<div class="sec" id="rxSec"><span class="lbl">⛽ ROUTEX-Tankstellen an der Strecke</span>
+    <p class="status" style="margin:0 0 10px">Sucht Tankstellen der ROUTEX-Marken Aral, bp, Circle K, Eni/Agip und OMV sowie die Partner Petrom, Hellenic und Kuster entlang der berechneten Route. Grundlage sind die Grenzübergänge oben, deshalb diese möglichst eintragen. Ob die ROUTEX-Karte an der jeweiligen Station angenommen wird, bitte im offiziellen Stationsfinder prüfen.</p>
+    <div class="grid2"><div><label class="lbl" for="rxFrom">Startort</label><input class="field" id="rxFrom" maxlength="80" value="${esc(rx&&rx.from||'Wien')}"></div>
+      <div><label class="lbl" for="rxTo">Zielort</label><input class="field" id="rxTo" maxlength="80" value="${esc(rx&&rx.to||dCity)}"></div></div>
+    <div class="grid2" style="margin-top:10px"><div><label class="lbl" for="rxRad">Abstand zur Strecke</label><select class="field" id="rxRad">${[[1000,'bis 1 km'],[2000,'bis 2 km'],[5000,'bis 5 km']].map(([v,t])=>`<option value="${v}"${(rx?rx.rad:2000)===v?' selected':''}>${t}</option>`).join('')}</select></div><div></div></div>
+    <div class="row" style="margin-top:12px"><button class="btn solid" type="button" id="rxGo" data-a="rxrun" ${rxBusy?'disabled':''}>${rx?'Neu berechnen':'Strecke berechnen und Tankstellen suchen'}</button></div>
+    <p class="status" id="rxProg" aria-live="polite">${esc(rxBusy)}</p><p class="err" id="rxErr" hidden></p>`;
+  if(rx){const list=rx.st.filter(s=>rxBrand==='Alle'||s.b===rxBrand);const cnt=b=>rx.st.filter(s=>s.b===b).length;
+    h+=`<p style="margin:10px 0 0;color:var(--ftx)">Strecke ca. <b style="color:var(--ac);font-weight:400">${rx.km} km</b> · ca. ${Math.floor(rx.h)} h ${Math.round((rx.h%1)*60)} min Fahrzeit · <b style="color:var(--ac);font-weight:400">${rx.st.length} Tankstellen</b></p>
+      <p class="status" style="margin-top:4px">Berechnet am ${esc(fmtDT(rx.at))}${rx.miss&&rx.miss.length?' · <b>Ohne Grenzübergang berechnet: '+esc(rx.miss.join(', '))+'</b>':''}</p>
+      <div class="row" style="margin-top:10px"><button class="btn" type="button" data-a="rxmap">${rxMapOpen?'Karte ausblenden':'🗺 Karte anzeigen'}</button><a class="btn lnk" href="${esc(rxRouteLink(rx))}" target="_blank" rel="noopener">Route in Google Maps</a><a class="btn lnk" href="https://bpplusmaps.bp.com/" target="_blank" rel="noopener">ROUTEX-Stationsfinder</a></div>
+      ${rxMapOpen?`<div id="rmap" class="rmap" role="region" aria-label="Karte der Strecke mit Tankstellen"><p class="status" style="padding:12px">Karte wird geladen …</p></div>`:''}
+      <span class="lbl" style="margin-top:14px">Marke</span><div class="row">${['Alle'].concat(RX_BRANDS.filter(cnt)).map(b=>`<button class="chip mini${rxBrand===b?' on':''}" type="button" data-a="rxbrand" data-v="${b}" aria-pressed="${rxBrand===b}">${b==='Alle'?'Alle '+rx.st.length:'<span class="bdot" style="background:'+RX_COLOR[b]+'"></span>'+b+' '+cnt(b)}</button>`).join('')}</div>
+      <div class="rxlist">${list.map(s=>`<div class="rxs" id="rx_${s.id}"><div class="rxh"><span class="km">km ${s.km}</span><span class="bdot" style="background:${RX_COLOR[s.b]}"></span><b>${esc(s.b)}</b>${s.hgv?' <span class="pers">LKW</span>':''}</div>
+        <p class="rxn">${esc(s.n)}${s.a?' · '+esc(s.a):''}</p>${s.oh?`<p class="status" style="margin:2px 0 0">Öffnungszeiten: ${esc(s.oh)}</p>`:''}
+        <div class="row" style="margin-top:8px"><a class="btn lnk sm" href="${navG(s)}" target="_blank" rel="noopener">Navigation Google</a><a class="btn lnk sm" href="${navA(s)}" target="_blank" rel="noopener">Apple Karten</a><button class="btn sm" type="button" data-a="rxfocus" data-v="${s.id}">Auf Karte</button></div></div>`).join('')||'<p class="status">Keine Tankstellen dieser Marke an der Strecke.</p>'}</div>`}
+  return h+`<p class="status" style="margin-top:12px">Kartendaten © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener" style="color:var(--lbl)">OpenStreetMap-Mitwirkende</a> · Route: OSRM</p></div>`}
+function loadCss(href){return new Promise((res,rej)=>{if(document.querySelector('link[href="'+href+'"]'))return res();const l=document.createElement('link');l.rel='stylesheet';l.href=href;l.onload=res;l.onerror=rej;document.head.appendChild(l)})}
+async function rxDrawMap(tr,focusId){const el=$('rmap');if(!el||!tr.rx)return;
+  try{if(!window.L){await loadCss('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css');await loadScript('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js')}}
+  catch(e){el.innerHTML='<p class="status" style="padding:12px">Karte kann ohne Internetverbindung nicht geladen werden. Die Navigations-Links funktionieren trotzdem.</p>';return}
+  if(!$('rmap'))return;el.innerHTML='';const L=window.L;const rx=tr.rx;
+  rxMap=L.map(el,{zoomControl:true});L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(rxMap);
+  const pl=L.polyline(rx.line,{color:'#C42B1C',weight:4,opacity:.85}).addTo(rxMap);
+  (rx.wp||[]).forEach((w,i)=>L.circleMarker(w.p,{radius:7,color:'#000',weight:2,fillColor:'#fff',fillOpacity:1}).addTo(rxMap).bindPopup('<b>'+esc(i===0?'Start: ':i===rx.wp.length-1?'Ziel: ':'Grenze: ')+esc(w.n)+'</b>'));
+  rxMarkers={};rx.st.filter(s=>rxBrand==='Alle'||s.b===rxBrand).forEach(s=>{rxMarkers[s.id]=L.circleMarker([s.lat,s.lon],{radius:7,color:'#111',weight:1,fillColor:RX_COLOR[s.b]||'#888',fillOpacity:.95}).addTo(rxMap)
+    .bindPopup(`<b>${esc(s.b)}</b> · km ${s.km}<br>${esc(s.n)}${s.a?'<br>'+esc(s.a):''}<br><a href="${navG(s)}" target="_blank" rel="noopener">Navigation Google</a> · <a href="${navA(s)}" target="_blank" rel="noopener">Apple Karten</a>`)});
+  if(focusId&&rxMarkers[focusId]){rxMap.setView(rxMarkers[focusId].getLatLng(),14);rxMarkers[focusId].openPopup()}else if(rxView)rxMap.setView(rxView.c,rxView.z);else rxMap.fitBounds(pl.getBounds(),{padding:[20,20]});
+  rxMap.on('moveend',()=>{rxView={c:rxMap.getCenter(),z:rxMap.getZoom()}})}
 
 /* ---------- ÜBERSICHT ---------- */
 function viewUebersicht(){const m=curM();if(!m){$('view').innerHTML=noMission();return}
@@ -1128,7 +1226,7 @@ $('view').addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!
   if(view==='einsaetze'&&mForm)readForm();
   const y=window.scrollY,keep=()=>{render();window.scrollTo(0,y)};
   if(a==='todotab'){todoTab=v;routeEdit=false;render();return}
-  if(view==='todo'&&m&&(a.startsWith('rt')||a==='xsug'||a==='xnow'||a==='xclr')){const r=routeAction(a,b,m);if(r===false)keep();return}
+  if(view==='todo'&&m&&(a.startsWith('rt')||a.startsWith('rx')||a==='xsug'||a==='xnow'||a==='xclr')){const r=routeAction(a,b,m);if(r===false)keep();return}
   switch(a){
     case 'newm':mForm=formFrom(null);confirmDel=false;if(view!=='einsaetze')location.hash='einsaetze';else{render();window.scrollTo(0,0)}break;
     case 'editm':mForm=formFrom(S.missions.find(x=>x.id===v));confirmDel=false;render();window.scrollTo(0,0);break;
