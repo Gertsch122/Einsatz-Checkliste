@@ -206,6 +206,7 @@ input[type=datetime-local].field{color-scheme:dark}
 .rxh .km{color:var(--ac);min-width:64px;font-variant-numeric:tabular-nums}
 .rxn{margin:4px 0 0;color:var(--tx);font-size:14px;overflow-wrap:anywhere}
 .bdot{display:inline-block;width:12px;height:12px;border-radius:50%;border:1px solid #000;vertical-align:middle;margin-right:4px}
+.rxh .off{margin-left:auto;font-size:11px;color:var(--lbl);letter-spacing:.04em}
 </style>
 </head>
 <body>
@@ -1063,40 +1064,51 @@ function simplify(pts,tol){if(pts.length<3)return pts;const keep=new Uint8Array(
     if(mi>0&&md>tol*tol){keep[mi]=1;st.push([a,mi],[mi,b])}}
   return pts.filter((_,i)=>keep[i])}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-async function geocode(q){S.geoCache=S.geoCache||{};if(S.geoCache[q])return S.geoCache[q];
-  const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=de&q='+encodeURIComponent(q));if(!r.ok)throw new Error('Ortssuche '+r.status);
-  const j=await r.json();await sleep(1100);if(!j.length)return null;const p=[+(+j[0].lat).toFixed(5),+(+j[0].lon).toFixed(5)];S.geoCache[q]=p;return p}
+async function fetchT(url,opt,ms){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms||20000);
+  try{return await fetch(url,Object.assign({},opt||{},{signal:c.signal}))}catch(e){throw new Error(e&&e.name==='AbortError'?'Zeitüberschreitung':'nicht erreichbar')}finally{clearTimeout(t)}}
+async function geocode(q){S.geoCache=S.geoCache||{};if(S.geoCache[q])return S.geoCache[q];let p=null,err='';
+  try{const r=await fetchT('https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=de&q='+encodeURIComponent(q),{},15000);
+    if(r.ok){const j=await r.json();if(j.length)p=[+(+j[0].lat).toFixed(5),+(+j[0].lon).toFixed(5)]}else err='Ortssuche '+r.status;await sleep(1100)}catch(e){err='Ortssuche '+e.message}
+  if(!p){try{const r=await fetchT('https://photon.komoot.io/api/?limit=1&q='+encodeURIComponent(q),{},15000);if(r.ok){const j=await r.json();const f=(j.features||[])[0];if(f)p=[+f.geometry.coordinates[1].toFixed(5),+f.geometry.coordinates[0].toFixed(5)]}else err=err||'Ortssuche '+r.status}catch(e){err=err||'Ortssuche '+e.message}}
+  if(p){S.geoCache[q]=p;return p}if(err&&!/^Ortssuche 4/.test(err))rxLastErr=err;return null}
+let rxLastErr='';
+async function osrm(wps){const path='/route/v1/driving/'+wps.map(w=>w.p[1]+','+w.p[0]).join(';')+'?overview=full&geometries=geojson';let last='';
+  for(const base of ['https://router.project-osrm.org','https://routing.openstreetmap.de/routed-car']){try{const r=await fetchT(base+path,{},30000);if(!r.ok){last='Routenberechnung '+r.status;continue}
+    const j=await r.json();if(j.routes&&j.routes.length)return j.routes[0];last='Keine Route gefunden'}catch(e){last='Routenberechnung: '+e.message}}
+  throw new Error(last)}
+const OVERPASS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
+async function overpass(q){let last='';for(const u of OVERPASS){try{const r=await fetchT(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)},70000);
+    if(r.ok)return await r.json();last='Tankstellen-Server '+r.status}catch(e){last='Tankstellen-Server: '+e.message}}throw new Error(last)}
+function segDist(p,a,b){const k=Math.cos(p[0]*Math.PI/180);const ax=(a[1]-p[1])*k,ay=a[0]-p[0],bx=(b[1]-p[1])*k,by=b[0]-p[0];const dx=bx-ax,dy=by-ay,L=dx*dx+dy*dy;let t=L?-(ax*dx+ay*dy)/L:0;t=Math.max(0,Math.min(1,t));
+  const x=ax+t*dx,y=ay+t*dy;return {d:Math.sqrt(x*x+y*y)*111.2,t}}
 function rxProg(t){rxBusy=t;const e=$('rxProg');if(e)e.textContent=t}
 async function rxRun(m,tr){const from=($('rxFrom').value||'').trim()||'Wien',to=($('rxTo').value||'').trim(),rad=+$('rxRad').value||2000;
   if(!to){toast('Bitte einen Zielort eingeben');return}
-  if(!navigator.onLine){toast('Keine Internetverbindung');return}
-  const btn=$('rxGo');if(btn)btn.disabled=true;
+  const btn=$('rxGo');if(btn)btn.disabled=true;const errEl=$('rxErr');if(errEl)errEl.hidden=true;let step='Ortssuche';rxLastErr='';
   try{const wps=[],miss=[];
-    rxProg('Suche Startort …');const ps=await geocode(from+(tr.c[0]?', '+tr.c[0]:''))||await geocode(from);if(!ps)throw new Error('Startort „'+from+'“ nicht gefunden');wps.push({n:from,p:ps});
+    rxProg('1/3 Suche Orte: '+from+' …');const ps=await geocode(from+(tr.c[0]?', '+tr.c[0]:''))||await geocode(from);if(!ps)throw new Error(rxLastErr||'Startort „'+from+'“ nicht gefunden');wps.push({n:from,p:ps});
     const bs=borders(tr);for(let i=0;i<bs.length;i++){const b=bs[i];const pt=(b.x.p||'').trim();if(!pt){miss.push(b.a+' → '+b.b);continue}
-      rxProg('Suche Grenzübergang '+(i+1)+' von '+bs.length+': '+pt+' …');const first=pt.split('/')[0].trim();
+      rxProg('1/3 Suche Grenzübergang '+(i+1)+' von '+bs.length+': '+pt+' …');const first=pt.split('/')[0].trim();
       const p=await geocode(first+', '+b.a)||await geocode(pt)||await geocode(first);if(p)wps.push({n:pt,p});else miss.push(b.a+' → '+b.b+' ('+pt+')')}
-    rxProg('Suche Zielort …');const last=tr.c[tr.c.length-1]||'';const pe=await geocode(to+(last?', '+last:''))||await geocode(to);if(!pe)throw new Error('Zielort „'+to+'“ nicht gefunden');wps.push({n:to,p:pe});
-    rxProg('Berechne Fahrtstrecke …');
-    const r=await fetch('https://router.project-osrm.org/route/v1/driving/'+wps.map(w=>w.p[1]+','+w.p[0]).join(';')+'?overview=full&geometries=geojson');
-    if(!r.ok)throw new Error('Routenberechnung '+r.status);const j=await r.json();if(!j.routes||!j.routes.length)throw new Error('Keine Route gefunden');
-    const full=j.routes[0].geometry.coordinates.map(c=>[c[1],c[0]]);const km=Math.round(j.routes[0].distance/1000),hrs=j.routes[0].duration/3600;
-    let line=simplify(full,0.004);if(line.length>700)line=simplify(full,0.012);line=line.map(p=>[+p[0].toFixed(5),+p[1].toFixed(5)]);
+    rxProg('1/3 Suche Zielort: '+to+' …');const last=tr.c[tr.c.length-1]||'';const pe=await geocode(to+(last?', '+last:''))||await geocode(to);if(!pe)throw new Error(rxLastErr||'Zielort „'+to+'“ nicht gefunden');wps.push({n:to,p:pe});
+    step='Routenberechnung';rxProg('2/3 Berechne Fahrtstrecke …');const rt=await osrm(wps);
+    const full=rt.geometry.coordinates.map(c=>[c[1],c[0]]);const km=Math.round(rt.distance/1000),hrs=rt.duration/3600;
+    let line=simplify(full,0.003);if(line.length>900)line=simplify(full,0.01);line=line.map(p=>[+p[0].toFixed(5),+p[1].toFixed(5)]);
     const cum=[0];for(let i=1;i<line.length;i++)cum.push(cum[i-1]+hav(line[i-1],line[i]));const scale=cum[cum.length-1]?km/cum[cum.length-1]:1;
-    const qline=simplify(full,0.006).map(p=>[+p[0].toFixed(4),+p[1].toFixed(4)]);const chunks=[];for(let i=0;i<qline.length-1;i+=120)chunks.push(qline.slice(i,i+121));
-    const bre='^('+['Aral','BP','Circle K','Statoil','Eni','Agip','OMV','Petrom','Hellenic','Kuster'].join('|')+')';const found={};
-    for(let i=0;i<chunks.length;i++){rxProg('Suche Tankstellen … Abschnitt '+(i+1)+' von '+chunks.length);
-      const ar='(around:'+rad+','+chunks[i].map(p=>p[0]+','+p[1]).join(',')+')';
-      const q='[out:json][timeout:120];(nwr["amenity"="fuel"]["brand"~"'+bre+'",i]'+ar+';nwr["amenity"="fuel"]["name"~"'+bre+'( |$)",i]'+ar+';);out center tags;';
-      let rr=null;for(let k=0;k<2&&!rr;k++){try{const x=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});if(x.ok)rr=await x.json();else await sleep(3000)}catch(e){await sleep(3000)}}
-      if(!rr)throw new Error('Tankstellen-Suche nicht erreichbar (Abschnitt '+(i+1)+')');
-      (rr.elements||[]).forEach(e=>{const t=e.tags||{};const br=rxNorm(t);if(!br)return;const lat=e.lat||(e.center&&e.center.lat),lon=e.lon||(e.center&&e.center.lon);if(lat==null)return;
-        let bi=0,bd=1e9;for(let n=0;n<line.length;n++){const d=(line[n][0]-lat)**2+(line[n][1]-lon)**2;if(d<bd){bd=d;bi=n}}
+    const boxes=[];let st=0;for(let i=1;i<line.length;i++){if(cum[i]-cum[st]>=40||i===line.length-1){const seg=line.slice(st,i+1);let s=90,w=180,n=-90,e=-180;seg.forEach(p=>{s=Math.min(s,p[0]);n=Math.max(n,p[0]);w=Math.min(w,p[1]);e=Math.max(e,p[1])});
+      const pl=rad/111000+0.002,po=pl/Math.max(0.2,Math.cos((s+n)/2*Math.PI/180));boxes.push([s-pl,w-po,n+pl,e+po].map(x=>+x.toFixed(4)));st=i}}
+    step='Tankstellen-Suche';const re='^(Aral|BP|Circle K|Statoil|Eni|Agip|OMV|Petrom|Hellenic|Kuster)';const found={};const per=25;
+    for(let g=0;g<boxes.length;g+=per){const grp=boxes.slice(g,g+per);rxProg('3/3 Suche Tankstellen … '+Math.min(100,Math.round((g+grp.length)*100/boxes.length))+' %');
+      const q='[out:json][timeout:60];('+grp.map(b=>'nwr["amenity"="fuel"]["brand"~"'+re+'",i]('+b.join(',')+');nwr["amenity"="fuel"]["name"~"'+re+'",i]('+b.join(',')+');').join('')+');out center tags;';
+      const rr=await overpass(q);
+      (rr.elements||[]).forEach(e=>{const t=e.tags||{};const br=rxNorm(t);if(!br)return;const lat=e.lat!=null?e.lat:(e.center&&e.center.lat),lon=e.lon!=null?e.lon:(e.center&&e.center.lon);if(lat==null)return;
+        let bd=1e9,bi=0,bt=0;for(let n=0;n<line.length-1;n++){const r=segDist([lat,lon],line[n],line[n+1]);if(r.d<bd){bd=r.d;bi=n;bt=r.t}}
+        if(bd*1000>rad)return;const kmAt=(cum[bi]+(cum[bi+1]-cum[bi])*bt)*scale;
         found[e.type+e.id]={id:e.type+e.id,b:br,n:t.name||br,a:[t['addr:street']?(t['addr:street']+(t['addr:housenumber']?' '+t['addr:housenumber']:'')):'',t['addr:postcode']||'',t['addr:city']||t['addr:place']||''].filter(Boolean).join(' '),
-          lat:+(+lat).toFixed(5),lon:+(+lon).toFixed(5),km:Math.round(cum[bi]*scale),oh:t.opening_hours||'',hgv:t.hgv==='yes'}})}
+          lat:+(+lat).toFixed(5),lon:+(+lon).toFixed(5),km:Math.round(kmAt),off:+bd.toFixed(1),oh:t.opening_hours||'',hgv:t.hgv==='yes'}})}
     tr.rx={from,to,rad,at:nowLocal(),km,h:+hrs.toFixed(1),line,wp:wps.map(w=>({n:w.n,p:w.p})),miss,st:Object.values(found).sort((a,b)=>a.km-b.km)};
     rxProg('');save();toast(tr.rx.st.length+' Tankstellen gefunden');rxMapOpen=true;const y=window.scrollY;render();window.scrollTo(0,y)}
-  catch(e){rxProg('');const el=$('rxErr');if(el){el.textContent='Fehler: '+(e&&e.message||e)+'. Bitte Internetverbindung prüfen und erneut versuchen.';el.hidden=false}if(btn)btn.disabled=false;save()}}
+  catch(e){rxProg('');save();const el=$('rxErr');if(el){el.innerHTML='<b>Fehler bei: '+esc(step)+'</b><br>'+esc(e&&e.message||e)+(navigator.onLine?'<br>Die freien Kartendienste sind manchmal überlastet. Bitte in ein paar Minuten erneut versuchen. Bereits gefundene Orte werden gespeichert, der nächste Versuch geht schneller.':'<br>Keine Internetverbindung.');el.hidden=false}if(btn)btn.disabled=false}}
 const navG=s=>`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}&travelmode=driving`;
 const navA=s=>`https://maps.apple.com/?daddr=${s.lat},${s.lon}&dirflg=d`;
 function rxRouteLink(rx){const w=rx.wp||[];if(w.length<2)return '';const mid=w.slice(1,-1).slice(0,8).map(x=>x.p.join(',')).join('|');
@@ -1115,7 +1127,7 @@ function rxHTML(m,tr){const rx=tr.rx;const last=tr.c[tr.c.length-1]||'';const dC
       <div class="row" style="margin-top:10px"><button class="btn" type="button" data-a="rxmap">${rxMapOpen?'Karte ausblenden':'🗺 Karte anzeigen'}</button><a class="btn lnk" href="${esc(rxRouteLink(rx))}" target="_blank" rel="noopener">Route in Google Maps</a><a class="btn lnk" href="https://bpplusmaps.bp.com/" target="_blank" rel="noopener">ROUTEX-Stationsfinder</a></div>
       ${rxMapOpen?`<div id="rmap" class="rmap" role="region" aria-label="Karte der Strecke mit Tankstellen"><p class="status" style="padding:12px">Karte wird geladen …</p></div>`:''}
       <span class="lbl" style="margin-top:14px">Marke</span><div class="row">${['Alle'].concat(RX_BRANDS.filter(cnt)).map(b=>`<button class="chip mini${rxBrand===b?' on':''}" type="button" data-a="rxbrand" data-v="${b}" aria-pressed="${rxBrand===b}">${b==='Alle'?'Alle '+rx.st.length:'<span class="bdot" style="background:'+RX_COLOR[b]+'"></span>'+b+' '+cnt(b)}</button>`).join('')}</div>
-      <div class="rxlist">${list.map(s=>`<div class="rxs" id="rx_${s.id}"><div class="rxh"><span class="km">km ${s.km}</span><span class="bdot" style="background:${RX_COLOR[s.b]}"></span><b>${esc(s.b)}</b>${s.hgv?' <span class="pers">LKW</span>':''}</div>
+      <div class="rxlist">${list.map(s=>`<div class="rxs" id="rx_${s.id}"><div class="rxh"><span class="km">km ${s.km}</span><span class="bdot" style="background:${RX_COLOR[s.b]}"></span><b>${esc(s.b)}</b>${s.hgv?' <span class="pers">LKW</span>':''}${s.off!=null?'<span class="off">'+String(s.off).replace('.',',')+' km neben Route</span>':''}</div>
         <p class="rxn">${esc(s.n)}${s.a?' · '+esc(s.a):''}</p>${s.oh?`<p class="status" style="margin:2px 0 0">Öffnungszeiten: ${esc(s.oh)}</p>`:''}
         <div class="row" style="margin-top:8px"><a class="btn lnk sm" href="${navG(s)}" target="_blank" rel="noopener">Navigation Google</a><a class="btn lnk sm" href="${navA(s)}" target="_blank" rel="noopener">Apple Karten</a><button class="btn sm" type="button" data-a="rxfocus" data-v="${s.id}">Auf Karte</button></div></div>`).join('')||'<p class="status">Keine Tankstellen dieser Marke an der Strecke.</p>'}</div>`}
   return h+`<p class="status" style="margin-top:12px">Kartendaten © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener" style="color:var(--lbl)">OpenStreetMap-Mitwirkende</a> · Route: OSRM</p></div>`}
