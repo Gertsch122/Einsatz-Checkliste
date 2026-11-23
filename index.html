@@ -186,6 +186,16 @@ optgroup,option{background:var(--chip);color:var(--ftx)}
 .sb.ts-offen.on{background:var(--onbg);color:var(--ontx);border-color:var(--onbd)}
 .sb.ts-teil.on{background:var(--duebg);color:var(--due);border-color:var(--due)}
 .sb.ts-erledigt.on{background:var(--okbg);color:var(--ok);border-color:var(--ok)}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}.seg .chip{text-transform:none;font-size:13px;padding:0 8px}
+.rline{margin:12px 0;color:var(--ftx);font-size:16px;letter-spacing:.03em;line-height:1.6;overflow-wrap:anywhere}.rline span{color:var(--ac)}
+.bcard{border:1px solid var(--bd);border-left:4px solid var(--lbl);background:var(--chip);padding:10px 12px 12px;margin-bottom:10px}
+.bcard.done{border-left-color:var(--ok)}.bcard.next{border-left-color:var(--due);border-color:var(--due)}
+.bh{display:flex;justify-content:space-between;gap:8px;align-items:center}.bst{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--lbl)}
+.bcard.done .bst{color:var(--ok)}.bcard.next .bst{color:var(--due)}
+.bpair{margin:4px 0 0;color:var(--ftx);font-size:17px;letter-spacing:.04em}
+.btime{margin:10px 0 0;padding:8px 10px;background:var(--okbg);border:1px solid var(--ok);color:var(--ok)}
+.chip.mini{min-height:36px;font-size:12px;text-transform:none;padding:0 10px}
+input[type=datetime-local].field{color-scheme:dark}
 </style>
 </head>
 <body>
@@ -459,7 +469,7 @@ const blankS=()=>({name:'',unit:'',title:'Einsatz-Checkliste',nightFrom:20,dayFr
 const LS={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 let S=Object.assign(blankS(),LS.get('ck_data',null)||{});
 let themeMode=LS.get('ck_theme','auto');
-let view='einsaetze',mForm=null,openItem=null,addOpen=false,addCat=null,addSub=null,fStatus='alle',showClosed=false,adderOpen=null,rmMode={key:null,sel:[]},edMode={key:null,v:null},tdEdit=null,tplEdit=null,confirmDel=false,boardOpen=true;
+let view='einsaetze',mForm=null,openItem=null,addOpen=false,addCat=null,addSub=null,fStatus='alle',showClosed=false,adderOpen=null,rmMode={key:null,sel:[]},edMode={key:null,v:null},tdEdit=null,tplEdit=null,todoTab='aufgaben',tripSel=null,routeEdit=false,confirmDel=false,boardOpen=true;
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pad=n=>String(n).padStart(2,'0');
@@ -694,6 +704,7 @@ function viewEinsaetze(){if(mForm)return viewForm();
       <p>${esc(destTxt(m))}</p><p>${m.from?esc(fmtD(m.from))+(m.to?' – '+esc(fmtD(m.to)):''):'Kein Zeitraum'}${when(m)?' · <span style="color:var(--ftx)">'+esc(when(m))+'</span>':''}</p>
       <div style="margin-top:10px">${progBar(m)}</div>
       <p>${b?'<span style="color:var(--bad)">🛒 '+b+' zu besorgen</span> · ':''}📦 ${cnt(m,'besorgt')} besorgt · ⬜ ${cnt(m,'offen')} offen · To-dos: ${ot} offen${teilTodos(m).length?' (davon '+teilTodos(m).length+' teilweise)':''}${od?' · <span style="color:var(--bad)">'+od+' überfällig</span>':''}</p>
+      ${(m.trips||[]).length?`<p>🚗 ${m.trips.map(t=>{const bs=borders(t);return esc(t.name)+': '+bs.filter(b=>b.x.at).length+'/'+bs.length+' Grenzen'}).join(' · ')}</p>`:''}
       <div class="row" style="margin-top:10px"><button class="btn solid" type="button" data-a="openm" data-v="${m.id}">Packliste öffnen</button><button class="btn" type="button" data-a="editm" data-v="${m.id}">Bearbeiten</button></div></div>`};
   if(act.length)h+=`<div class="sec"><span class="lbl">Aktive Einsätze (${act.length})</span>${act.map(card).join('')}</div>`;
   if(cl.length)h+=`<div class="sec"><button class="btn" type="button" data-a="togclosed">${showClosed?'▾':'▸'} Abgeschlossene Einsätze (${cl.length})</button>${showClosed?'<div style="margin-top:10px">'+cl.sort((a,b)=>(b.from||'').localeCompare(a.from||'')).map(card).join('')+'</div>':''}</div>`;
@@ -820,7 +831,10 @@ function addPanel(m){if(!addOpen)return `<div class="sec"><button class="btn sol
 function bindAdder(){const i=$('addIn');if(i){i.focus();i.addEventListener('keydown',e=>{if(e.key==='Enter')document.querySelector('[data-a="addok"]').click();if(e.key==='Escape'){adderOpen=null;render()}})}}
 
 /* ---------- TO-DO ---------- */
+function todoSeg(m){const tr=(m.trips||[]);const bs=tr.length?borders(curTrip(m)):[];
+  return `<div class="sec" style="padding:4px 0 12px"><div class="seg"><button class="chip${todoTab==='aufgaben'?' on':''}" type="button" data-a="todotab" data-v="aufgaben" aria-pressed="${todoTab==='aufgaben'}">📋 Aufgaben · ${openTodos(m).length} offen</button><button class="chip${todoTab==='route'?' on':''}" type="button" data-a="todotab" data-v="route" aria-pressed="${todoTab==='route'}">🚗 Fahrtstrecke${tr.length?' · '+bs.filter(b=>b.x.at).length+'/'+bs.length:''}</button></div></div>`}
 function viewTodo(){const m=curM();if(!m){$('view').innerHTML=noMission();return}
+  if(todoTab==='route'){$('view').innerHTML=mSel()+todoSeg(m)+routeHTML(m)+`<p class="status" id="syncState"></p>`;bindRoute(m);setStatus();return}
   const t=today(),byDue=(a,b)=>(a.due||'9999').localeCompare(b.due||'9999');
   const grp={offen:(m.todos||[]).filter(x=>tst(x)==='offen').sort(byDue),teil:(m.todos||[]).filter(x=>tst(x)==='teil').sort(byDue),erledigt:(m.todos||[]).filter(x=>tst(x)==='erledigt').sort((a,b)=>(b.doneAt||'').localeCompare(a.doneAt||''))};
   const cls=x=>tst(x)==='erledigt'?'done':x.due&&x.due<t?'bad':x.due&&dayDiff(x.due,t)<=7?'due':'';
@@ -834,7 +848,7 @@ function viewTodo(){const m=curM();if(!m){$('view').innerHTML=noMission();return
       ${x.note?`<p class="tnote">${esc(x.note).replace(/\n/g,'<br>')}</p>`:''}
       <div class="tsbtns" role="group" aria-label="Status ${esc(x.text)}">${TST.map(s=>`<button class="sb ts-${s.k}${k===s.k?' on':''}" type="button" data-a="tdst" data-v="${x.id}" data-s="${s.k}" aria-pressed="${k===s.k}"><span aria-hidden="true">${s.i}</span><small>${esc(s.t)}</small></button>`).join('')}</div></div>`};
   const sec=(k,lbl,empty)=>`<div class="sec"><span class="lbl">${lbl} (${grp[k].length})</span>${grp[k].length?grp[k].map(row).join(''):`<p class="status" style="margin:0">${empty}</p>`}</div>`;
-  let h=mSel()+`<div class="sec" style="padding-top:6px"><span class="lbl">Neue Aufgabe</span>
+  let h=mSel()+todoSeg(m)+`<div class="sec" style="padding-top:6px"><span class="lbl">Neue Aufgabe</span>
     <input class="field" id="tdText" maxlength="160" placeholder="z. B. Starlink abholen">
     <div class="grid2" style="margin-top:10px"><div><label class="lbl" for="tdDue">Fällig am</label><input class="field" type="date" id="tdDue"></div><div></div></div>
     <label class="lbl" for="tdNote" style="margin-top:10px">Notiz (optional)</label><textarea class="field" id="tdNote" maxlength="1000" placeholder="z. B. Ansprechpartner, Telefonnummer, was noch fehlt"></textarea>
@@ -843,6 +857,182 @@ function viewTodo(){const m=curM();if(!m){$('view').innerHTML=noMission();return
   ${sec('offen','⬜ Offen','Keine offenen Aufgaben.')}${sec('teil','⏳ Teilweise erledigt','Keine teilweise erledigten Aufgaben.')}${grp.erledigt.length?sec('erledigt','✅ Erledigt',''):''}
   <p class="status" id="syncState"></p>`;
   $('view').innerHTML=h;bindAdder();setStatus()}
+
+/* ---------- Fahrtstrecke ---------- */
+const NB_RAW=`Österreich:Deutschland,Tschechien,Slowakei,Ungarn,Slowenien,Italien,Schweiz,Liechtenstein
+Deutschland:Schweiz,Frankreich,Luxemburg,Belgien,Niederlande,Dänemark,Polen,Tschechien
+Schweiz:Liechtenstein,Italien,Frankreich
+Italien:Frankreich,Slowenien,San Marino,Vatikanstadt
+Frankreich:Belgien,Luxemburg,Monaco,Spanien,Andorra
+Spanien:Andorra,Portugal
+Belgien:Luxemburg,Niederlande
+Polen:Tschechien,Slowakei,Ukraine,Belarus,Litauen,Russland
+Tschechien:Slowakei
+Slowakei:Ukraine,Ungarn
+Ungarn:Ukraine,Rumänien,Serbien,Kroatien,Slowenien
+Slowenien:Kroatien
+Kroatien:Serbien,Bosnien und Herzegowina,Montenegro
+Bosnien und Herzegowina:Serbien,Montenegro
+Serbien:Rumänien,Bulgarien,Nordmazedonien,Kosovo,Montenegro
+Montenegro:Kosovo,Albanien
+Kosovo:Albanien,Nordmazedonien
+Albanien:Nordmazedonien,Griechenland
+Nordmazedonien:Griechenland,Bulgarien
+Griechenland:Bulgarien,Türkei
+Bulgarien:Rumänien,Türkei
+Rumänien:Moldau,Ukraine
+Moldau:Ukraine
+Ukraine:Belarus,Russland
+Belarus:Litauen,Lettland,Russland
+Litauen:Lettland,Russland
+Lettland:Estland,Russland
+Estland:Russland
+Finnland:Schweden,Norwegen,Russland
+Schweden:Norwegen
+Norwegen:Russland
+Russland:Georgien,Aserbaidschan,Kasachstan,China,Mongolei,Nordkorea
+Türkei:Georgien,Armenien,Aserbaidschan,Iran,Irak,Syrien
+Georgien:Armenien,Aserbaidschan
+Armenien:Aserbaidschan,Iran
+Aserbaidschan:Iran
+Iran:Turkmenistan,Afghanistan,Pakistan,Irak
+Irak:Kuwait,Saudi-Arabien,Jordanien,Syrien
+Syrien:Jordanien,Israel,Libanon
+Libanon:Israel
+Israel:Jordanien,Ägypten,Palästina
+Palästina:Jordanien,Ägypten
+Jordanien:Saudi-Arabien
+Saudi-Arabien:Kuwait,Katar,Vereinigte Arabische Emirate,Oman,Jemen
+Vereinigte Arabische Emirate:Oman
+Oman:Jemen
+Ägypten:Libyen,Sudan
+Libyen:Sudan,Tschad,Niger,Algerien,Tunesien
+Sudan:Tschad,Zentralafrikanische Republik,Südsudan,Äthiopien,Eritrea
+Eritrea:Äthiopien,Dschibuti
+Äthiopien:Dschibuti,Somalia,Kenia,Südsudan
+Dschibuti:Somalia
+Somalia:Kenia
+Kenia:Tansania,Uganda,Südsudan
+Südsudan:Uganda,Demokratische Republik Kongo,Zentralafrikanische Republik
+Afghanistan:Turkmenistan,Usbekistan,Tadschikistan,China,Pakistan
+Pakistan:China,Indien
+Turkmenistan:Kasachstan,Usbekistan
+Usbekistan:Kasachstan,Kirgisistan,Tadschikistan
+Tadschikistan:Kirgisistan,China
+Kirgisistan:Kasachstan,China
+Kasachstan:China
+Indien:China,Nepal,Bhutan,Bangladesch,Myanmar
+China:Mongolei,Nepal,Bhutan,Myanmar,Laos,Vietnam,Nordkorea
+Algerien:Tunesien,Niger,Mali,Mauretanien,Marokko`;
+const NB={};NB_RAW.split('\n').forEach(l=>{const i=l.indexOf(':');const a=l.slice(0,i);l.slice(i+1).split(',').forEach(b=>{(NB[a]=NB[a]||[]).push(b);(NB[b]=NB[b]||[]);if(!NB[b].includes(a))NB[b].push(a)})});
+const ROUTE_PRESET={
+  'Bosnien und Herzegowina':['Österreich','Slowenien','Kroatien','Bosnien und Herzegowina'],
+  'Montenegro':['Österreich','Slowenien','Kroatien','Bosnien und Herzegowina','Montenegro'],
+  'Kroatien':['Österreich','Slowenien','Kroatien'],
+  'Serbien':['Österreich','Ungarn','Serbien'],
+  'Kosovo':['Österreich','Ungarn','Serbien','Kosovo'],
+  'Nordmazedonien':['Österreich','Ungarn','Serbien','Nordmazedonien'],
+  'Ukraine':['Österreich','Slowakei','Ukraine'],
+  'Türkei':['Österreich','Ungarn','Serbien','Bulgarien','Türkei'],
+  'Irak':['Österreich','Ungarn','Serbien','Bulgarien','Türkei','Irak'],
+  'Iran':['Österreich','Ungarn','Serbien','Bulgarien','Türkei','Iran'],
+  'Pakistan':['Österreich','Ungarn','Serbien','Bulgarien','Türkei','Iran','Pakistan'],
+  'Afghanistan':['Österreich','Ungarn','Serbien','Bulgarien','Türkei','Iran','Afghanistan'],
+  'Äthiopien':['Österreich','Äthiopien']
+};
+const AVOID=['Russland','Belarus','China','Syrien','Israel','Palästina','Libyen','Jemen','Nordkorea'];
+const CROSS={
+  'Österreich|Slowenien':['Spielfeld / Šentilj','Karawankentunnel','Loiblpass','Bad Radkersburg / Gornja Radgona'],
+  'Kroatien|Slowenien':['Obrežje / Bregana','Gruškovje / Macelj','Rupa / Pasjak'],
+  'Bosnien und Herzegowina|Kroatien':['Stara Gradiška / Gradiška','Slavonski Brod / Brod','Bijača / Nova Sela','Metković / Doljani'],
+  'Bosnien und Herzegowina|Montenegro':['Klobuk / Ilino Brdo','Vraćenovići / Deleuša','Hum / Šćepan Polje'],
+  'Bosnien und Herzegowina|Serbien':['Rača','Karakaj / Mali Zvornik'],
+  'Kroatien|Montenegro':['Karasovići / Debeli Brijeg'],
+  'Kroatien|Serbien':['Bajakovo / Batrovci'],
+  'Österreich|Ungarn':['Nickelsdorf / Hegyeshalom','Klingenbach / Sopron','Heiligenkreuz / Rábafüzes'],
+  'Serbien|Ungarn':['Röszke / Horgoš','Tompa / Kelebija'],
+  'Österreich|Slowakei':['Kittsee / Jarovce','Berg / Petržalka'],
+  'Slowakei|Ukraine':['Vyšné Nemecké / Uschhorod'],
+  'Ukraine|Ungarn':['Záhony / Tschop','Beregsurány / Luschanka'],
+  'Polen|Ukraine':['Medyka / Schehyni','Korczowa / Krakowez','Dorohusk / Jahodyn'],
+  'Bulgarien|Serbien':['Gradina / Kalotina'],
+  'Bulgarien|Türkei':['Kapitan Andreevo / Kapıkule'],
+  'Griechenland|Türkei':['Kipoi / İpsala'],
+  'Nordmazedonien|Serbien':['Preševo / Tabanovce'],
+  'Montenegro|Serbien':['Dobrakovo / Gostun'],
+  'Iran|Türkei':['Gürbulak / Bazargan','Kapıköy / Razi'],
+  'Irak|Türkei':['Habur / Ibrahim Khalil'],
+  'Iran|Pakistan':['Mirjaveh / Taftan'],
+  'Afghanistan|Pakistan':['Torkham','Chaman / Spin Boldak'],
+  'Afghanistan|Iran':['Dogharoun / Islam Qala','Milak / Zaranj'],
+  'Deutschland|Österreich':['Walserberg','Suben','Kiefersfelden / Kufstein'],
+  'Italien|Österreich':['Brenner','Arnoldstein / Tarvisio'],
+  'Österreich|Tschechien':['Drasenhofen / Mikulov','Wullowitz / Dolní Dvořiště'],
+  'Rumänien|Ungarn':['Nădlac / Csanádpalota','Borș / Ártánd']
+};
+const crossSug=(a,b)=>CROSS[[a,b].sort((x,y)=>x.localeCompare(y,'de')).join('|')]||[];
+function routeFor(from,to){if(!from||!to)return [from||'Österreich'];if(from===to)return [from];
+  if(from==='Österreich'&&ROUTE_PRESET[to])return ROUTE_PRESET[to].slice();
+  const prev={[from]:null},q=[from];while(q.length){const c=q.shift();if(c===to)break;(NB[c]||[]).forEach(n=>{if(!(n in prev)&&(n===to||!AVOID.includes(n))){prev[n]=c;q.push(n)}})}
+  if(!(to in prev))return [from,to];const r=[];for(let c=to;c!==null;c=prev[c])r.unshift(c);return r}
+function nowLocal(){const d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())}
+const fmtDT=s=>s?fmtD(s.slice(0,10))+', '+s.slice(11,16)+' Uhr':'';
+const xKey=(a,b)=>a+'>'+b;
+function borders(tr){const r=[];for(let i=0;i<tr.c.length-1;i++){const k=xKey(tr.c[i],tr.c[i+1]);r.push({i,a:tr.c[i],b:tr.c[i+1],k,x:(tr.x||{})[k]||{}})}return r}
+function curTrip(m){m.trips=m.trips||[];let t=m.trips.find(x=>x.id===tripSel);if(!t){t=m.trips[0]||null;tripSel=t?t.id:null}return t}
+function tripText(m,tr){const bs=borders(tr);return 'Fahrtstrecke '+tr.name+' – '+m.name+(S.name?' ('+S.name+')':'')+':\n'+tr.c.join(' → ')+'\n'+bs.map(b=>'• '+b.a+' → '+b.b+(b.x.p?' ('+b.x.p+')':'')+': '+(b.x.at?fmtDT(b.x.at):'noch nicht passiert')+(b.x.n?' – '+b.x.n:'')).join('\n')}
+function routeHTML(m){const tr=curTrip(m);const all=allCountries();
+  const cOpt=(sel)=>all.map(c=>`<option value="${esc(c)}"${c===sel?' selected':''}>${esc(c)}</option>`).join('');
+  if(!tr){const dc=(m.dest&&m.dest[0]&&m.dest[0].country)||'';
+    return `<div class="sec"><span class="lbl">Fahrtstrecke anlegen</span><p style="margin:0 0 12px">Die App schlägt die Länder auf dem Landweg vor. Du kannst sie danach beliebig ändern. Bei Anreise mit dem Flugzeug brauchst du keine Fahrtstrecke.</p>
+      <div class="grid2"><div><label class="lbl" for="rtFrom">Start</label><select class="field" id="rtFrom">${cOpt('Österreich')}</select></div>
+      <div><label class="lbl" for="rtTo">Ziel</label><select class="field" id="rtTo"><option value="">– Ziel wählen –</option>${cOpt(dc)}</select></div></div>
+      <div class="row" style="margin-top:12px"><button class="btn solid" type="button" data-a="rtnew">Strecke vorschlagen</button></div></div>`}
+  const bs=borders(tr),done=bs.filter(b=>b.x.at).length,next=bs.find(b=>!b.x.at);
+  let h=`<div class="sec" style="padding-top:6px">${m.trips.length>1||true?`<div class="row">${m.trips.map(t=>`<button class="chip${t.id===tr.id?' on':''}" type="button" data-a="rtpick" data-v="${t.id}" aria-pressed="${t.id===tr.id}">${esc(t.name)}</button>`).join('')}${m.trips.some(t=>t.name==='Rückfahrt')?'':`<button class="chip add" type="button" data-a="rtback">+ Rückfahrt anlegen</button>`}</div>`:''}
+    <p class="rline">${tr.c.map(esc).join(' <span aria-hidden="true">→</span> ')}</p>
+    <div class="bar"><div class="t"><span>Grenzen passiert</span><span>${done} / ${bs.length}</span></div><div class="track"><div class="fill" style="width:${bs.length?Math.round(done*100/bs.length):0}%"></div></div></div>
+    <div class="row" style="margin-top:12px"><button class="btn" type="button" data-a="rtedit">${routeEdit?'Bearbeiten beenden':'✎ Strecke bearbeiten'}</button><button class="btn" type="button" data-a="rtcopy">Status kopieren</button></div>
+    <textarea class="field" id="msgBox" hidden readonly style="margin-top:10px"></textarea></div>`;
+  if(routeEdit){h+=`<div class="sec edbox"><span class="lbl">Länder der Strecke (${esc(tr.name)})</span>${tr.c.map((c,i)=>`<div class="custom"><span>${i+1}. ${esc(c)}</span><span style="display:flex"><button class="x" type="button" data-a="rtup" data-v="${i}" ${i?'':'disabled'} aria-label="${esc(c)} nach oben">↑</button><button class="x" type="button" data-a="rtdn" data-v="${i}" ${i<tr.c.length-1?'':'disabled'} aria-label="${esc(c)} nach unten">↓</button><button class="x" type="button" data-a="rtrm" data-v="${i}" aria-label="${esc(c)} entfernen">×</button></span></div>`).join('')}
+      <div class="adder"><select class="field" id="rtAdd"><option value="">– Land wählen –</option>${cOpt('')}</select><button class="btn solid" type="button" data-a="rtadd">Einfügen</button></div>
+      <p class="status">„Einfügen“ setzt das Land vor das letzte Land (Ziel). Mit ↑ ↓ änderst du die Reihenfolge.</p>
+      <div class="adder"><input class="field" id="rtName" maxlength="40" value="${esc(tr.name)}" aria-label="Name der Strecke"><button class="btn" type="button" data-a="rtren">Umbenennen</button></div>
+      <div class="row" style="margin-top:10px"><button class="btn danger" type="button" data-a="rtdel">Diese Strecke löschen</button></div></div>`}
+  h+=bs.map((b,n)=>{const st=b.x.at?'done':next&&next.k===b.k?'next':'';const sg=crossSug(b.a,b.b);
+    return `<div class="bcard ${st}"><div class="bh"><span class="lbl" style="margin:0">Grenze ${n+1}</span><span class="bst">${b.x.at?'✅ Passiert':st==='next'?'➜ Nächste Grenze':'Offen'}</span></div>
+      <p class="bpair">${esc(b.a)} → ${esc(b.b)}</p>
+      <label class="lbl" for="xp_${n}" style="margin-top:8px">Grenzübergang</label><input class="field" id="xp_${n}" data-xp="${esc(b.k)}" maxlength="80" value="${esc(b.x.p||'')}" placeholder="z. B. Spielfeld / Šentilj">
+      ${sg.length?`<div class="row" style="margin-top:6px">${sg.map(x=>`<button class="chip mini${b.x.p===x?' on':''}" type="button" data-a="xsug" data-k="${esc(b.k)}" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>`:''}
+      ${b.x.at?`<p class="btime">Passiert am ${esc(fmtDT(b.x.at))}</p>`:''}
+      <div class="row" style="margin-top:10px;align-items:flex-end"><button class="btn solid" type="button" data-a="xnow" data-k="${esc(b.k)}">${b.x.at?'Zeit auf jetzt setzen':'Jetzt passiert'}</button>
+        <div style="flex:1 1 190px;min-width:0"><label class="lbl" for="xat_${n}">Zeit manuell</label><input class="field" type="datetime-local" id="xat_${n}" data-xat="${esc(b.k)}" value="${esc(b.x.at||'')}"></div></div>
+      <label class="lbl" for="xn_${n}" style="margin-top:10px">Notiz</label><input class="field" id="xn_${n}" data-xn="${esc(b.k)}" maxlength="200" value="${esc(b.x.n||'')}" placeholder="z. B. 40 Min. Wartezeit, Kontrolle Fahrzeug">
+      ${b.x.at?`<div class="row" style="margin-top:8px"><button class="btn" type="button" data-a="xclr" data-k="${esc(b.k)}">Zeit löschen</button></div>`:''}</div>`}).join('');
+  if(!bs.length)h+=`<p class="status">Die Strecke hat nur ein Land. Über „✎ Strecke bearbeiten“ Länder hinzufügen.</p>`;
+  return h}
+function bindRoute(m){const tr=curTrip(m);if(!tr)return;const X=k=>{tr.x=tr.x||{};return tr.x[k]=tr.x[k]||{}};
+  $('view').querySelectorAll('[data-xp]').forEach(i=>i.addEventListener('change',()=>{X(i.dataset.xp).p=i.value.trim();save()}));
+  $('view').querySelectorAll('[data-xn]').forEach(i=>i.addEventListener('change',()=>{X(i.dataset.xn).n=i.value.trim();save()}));
+  $('view').querySelectorAll('[data-xat]').forEach(i=>i.addEventListener('change',()=>{X(i.dataset.xat).at=i.value;save();toast(i.value?'Zeit gespeichert':'Zeit gelöscht');const y=window.scrollY;render();window.scrollTo(0,y)}))}
+function routeAction(a,b,m){const v=b.dataset.v,k=b.dataset.k;const tr=curTrip(m);const X=kk=>{tr.x=tr.x||{};return tr.x[kk]=tr.x[kk]||{}};
+  switch(a){
+    case 'rtnew':{const f=$('rtFrom').value,t=$('rtTo').value;if(!t){toast('Bitte ein Ziel wählen');return true}m.trips=m.trips||[];const id=uid();m.trips.push({id,name:'Hinfahrt',c:routeFor(f,t),x:{}});tripSel=id;routeEdit=false;save();toast('Strecke vorgeschlagen – bei Bedarf bearbeiten');return false}
+    case 'rtpick':tripSel=v;return false;
+    case 'rtback':{const id=uid();const x={};Object.entries(tr.x||{}).forEach(([kk,o])=>{const [p,q]=kk.split('>');if(o.p)x[xKey(q,p)]={p:o.p}});m.trips.push({id,name:'Rückfahrt',c:tr.c.slice().reverse(),x});tripSel=id;save();toast('Rückfahrt angelegt');return false}
+    case 'rtedit':routeEdit=!routeEdit;return false;
+    case 'rtup':{const i=+v;[tr.c[i-1],tr.c[i]]=[tr.c[i],tr.c[i-1]];save();return false}
+    case 'rtdn':{const i=+v;[tr.c[i+1],tr.c[i]]=[tr.c[i],tr.c[i+1]];save();return false}
+    case 'rtrm':tr.c.splice(+v,1);save();return false;
+    case 'rtadd':{const c=$('rtAdd').value;if(!c){toast('Bitte ein Land wählen');return true}if(tr.c.length>1)tr.c.splice(tr.c.length-1,0,c);else tr.c.push(c);save();return false}
+    case 'rtren':{const n=$('rtName').value.trim();if(n){tr.name=n;save();toast('Umbenannt')}return false}
+    case 'rtdel':m.trips=m.trips.filter(t=>t!==tr);tripSel=null;routeEdit=false;save();toast('Strecke gelöscht');return false;
+    case 'rtcopy':copyText(tripText(m,tr));return true;
+    case 'xsug':X(k).p=v;save();return false;
+    case 'xnow':X(k).at=nowLocal();save();toast('Grenzübertritt gespeichert: '+fmtDT(X(k).at));return false;
+    case 'xclr':X(k).at='';save();return false;
+  }
+  return null}
 
 /* ---------- ÜBERSICHT ---------- */
 function viewUebersicht(){const m=curM();if(!m){$('view').innerHTML=noMission();return}
@@ -870,7 +1060,8 @@ async function copyText(t){try{await navigator.clipboard.writeText(t);toast('Kop
 function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s)})}
 async function ensurePdf(){if(!window.jspdf)await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
   if(!window.jspdf.jsPDF.API.autoTable)await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js')}
-const pdfTxt=v=>String(v==null?'':v).replace(/[–—]/g,'-').replace(/…/g,'...').replace(/[“”„]/g,'"').replace(/[‘’]/g,"'").replace(/[^\x00-\xFF]/g,'?');
+const PDFMAP={'ı':'i','İ':'I','ł':'l','Ł':'L','đ':'d','Đ':'D','ș':'s','Ș':'S','ț':'t','Ț':'T','→':'->','ʻ':"'"};
+const pdfTxt=v=>String(v==null?'':v).replace(/[–—]/g,'-').replace(/…/g,'...').replace(/[“”„]/g,'"').replace(/[‘’]/g,"'").replace(/[^\x00-\xFF]/g,ch=>{if(PDFMAP[ch])return PDFMAP[ch];const b=ch.normalize('NFD').replace(/[\u0300-\u036f]/g,'');return /^[\x00-\xFF]+$/.test(b)?b:'?'});
 async function saveFile(name,data,mime){let dl=null;try{dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null}catch(e){}
   if(dl){await dl.save({filename:name,data});return}
   const b=data instanceof Blob?data:new Blob([data],{type:mime});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),10000)}
@@ -893,6 +1084,11 @@ async function packPdf(m){const err=$('pdfErr'),btn=document.querySelector('[dat
       doc.autoTable({startY:y+3,head:[['Aufgabe','Fällig','Status','Notiz'].map(pdfTxt)],body:td.map(x=>[x.text,x.due?fmtD(x.due):'',TST.find(q=>q.k===tst(x)).t+(tst(x)==='erledigt'&&x.doneAt?' '+fmtD(x.doneAt):''),x.note||''].map(pdfTxt)),theme:'grid',margin:{left:14,right:14,bottom:16},
         styles:{font:'helvetica',fontSize:8.5,cellPadding:1.8,lineColor:[150,150,140],lineWidth:0.1,textColor:[20,20,20],valign:'top'},headStyles:{fillColor:[59,63,43],textColor:[240,236,220],fontStyle:'bold'},columnStyles:{0:{cellWidth:55},1:{cellWidth:22},2:{cellWidth:30}},
         didParseCell:d=>{if(d.section==='body'&&d.column.index===2){const k=tst(td[d.row.index]);const f={teil:[250,228,180],erledigt:[205,235,208]}[k];if(f)d.cell.styles.fillColor=f}}})}
+    (m.trips||[]).forEach(tr=>{const bs=borders(tr);if(!bs.length)return;let y=doc.lastAutoTable.finalY+10;if(y>Hh-40){doc.addPage();y=20}
+      doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text(pdfTxt('FAHRTSTRECKE '+tr.name.toUpperCase()),14,y);doc.setFont('helvetica','normal');doc.setFontSize(9);doc.text(pdfTxt(tr.c.join(' -> ')),14,y+5);
+      doc.autoTable({startY:y+8,head:[['Grenze','Grenzübergang','Passiert','Notiz'].map(pdfTxt)],body:bs.map(b=>[b.a+' -> '+b.b,b.x.p||'',b.x.at?fmtDT(b.x.at):'offen',b.x.n||''].map(pdfTxt)),theme:'grid',margin:{left:14,right:14,bottom:16},
+        styles:{font:'helvetica',fontSize:8.5,cellPadding:1.8,lineColor:[150,150,140],lineWidth:0.1,textColor:[20,20,20],valign:'top'},headStyles:{fillColor:[59,63,43],textColor:[240,236,220],fontStyle:'bold'},columnStyles:{0:{cellWidth:48},2:{cellWidth:34}},
+        didParseCell:d=>{if(d.section==='body'&&d.column.index===2&&bs[d.row.index].x.at)d.cell.styles.fillColor=[205,235,208]}})});
     const n=doc.internal.getNumberOfPages();for(let i=1;i<=n;i++){doc.setPage(i);doc.setFontSize(8);doc.setTextColor(90,90,90);doc.text(pdfTxt('Packliste '+m.name),14,Hh-8);doc.text('Seite '+i+' von '+n,W-14,Hh-8,{align:'right'});doc.setTextColor(0,0,0)}
     await saveFile('Packliste_'+m.name.replace(/[^A-Za-z0-9._-]+/g,'_')+'_'+today()+'.pdf',doc.output('blob'),'application/pdf');toast('PDF bereit')}
   catch(e){if(!(e&&e.code==='declined'))return fail('PDF konnte nicht erstellt werden. Bitte erneut versuchen.')}
@@ -931,6 +1127,8 @@ function doEdit(){const key=edMode.key,old=edMode.v,nv=(($('edName')||{}).value|
 $('view').addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b||b.disabled)return;const a=b.dataset.a,v=b.dataset.v;const m=curM();
   if(view==='einsaetze'&&mForm)readForm();
   const y=window.scrollY,keep=()=>{render();window.scrollTo(0,y)};
+  if(a==='todotab'){todoTab=v;routeEdit=false;render();return}
+  if(view==='todo'&&m&&(a.startsWith('rt')||a==='xsug'||a==='xnow'||a==='xclr')){const r=routeAction(a,b,m);if(r===false)keep();return}
   switch(a){
     case 'newm':mForm=formFrom(null);confirmDel=false;if(view!=='einsaetze')location.hash='einsaetze';else{render();window.scrollTo(0,0)}break;
     case 'editm':mForm=formFrom(S.missions.find(x=>x.id===v));confirmDel=false;render();window.scrollTo(0,0);break;
